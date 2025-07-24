@@ -8,7 +8,7 @@ const App = () => {
     <Router>
       <Routes>
         <Route path="/" element={<RoomJoin />} />
-        <Route path="/:id" element={<Whiteboard />} />
+        <Route path="/:roomId" element={<Whiteboard />} />
       </Routes>
     </Router>
   );

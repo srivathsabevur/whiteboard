@@ -1,150 +1,158 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
+import io from "socket.io-client";
+import axios from "axios";
 import Toolbar from "./Toolbar";
 import UserCursors from "./UserCursors";
-import io from "socket.io-client";
+import { Users } from "lucide-react";
 
 const DrawingCanvas = ({ roomId }) => {
+  const BASE_URL = "http://localhost:5000";
   const canvasRef = useRef(null);
-  const cursorThrottleRef = useRef(null);
 
-  const [drawing, setDrawing] = useState(false);
   const [socket, setSocket] = useState(null);
+  const [drawing, setDrawing] = useState(false);
+  const [currentPath, setCurrentPath] = useState([]);
   const [thickness, setThickness] = useState(5);
   const [color, setColor] = useState("black");
   const [showSlider, setShowSlider] = useState(false);
   const [showColors, setShowColors] = useState(false);
-
-  // States for cursor tracking and user presence
   const [otherCursors, setOtherCursors] = useState({});
   const [activeUsers, setActiveUsers] = useState(0);
-  const [currentPath, setCurrentPath] = useState([]);
 
-  const handleStopDrawing = () => {
-    if (!drawing) return;
-    setDrawing(false);
-    const ctx = canvasRef.current.getContext("2d");
-    ctx.closePath();
-
-    if (socket && currentPath.length > 0) {
-      socket.emit("draw-end", {
-        path: currentPath,
-        color: color,
-        width: thickness,
-        roomId: roomId,
-      });
-      setCurrentPath([]);
-    }
-  };
-
+  // Handle drawing start
   const handleStartDrawing = (e) => {
-    const ctx = canvasRef.current.getContext("2d");
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
+    const x = e.nativeEvent.clientX - rect.left;
+    const y = e.nativeEvent.clientY - rect.top;
     setDrawing(true);
     setCurrentPath([{ x, y }]);
 
-    ctx.lineWidth = thickness;
-    ctx.strokeStyle = color;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-
     if (socket) {
       socket.emit("draw-start", {
-        x: x,
-        y: y,
-        color: color,
+        roomId,
+        x,
+        y,
+        color,
         width: thickness,
-        roomId: roomId,
       });
     }
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = thickness;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
   };
 
+  // Handle drawing move
   const handleDraw = (e) => {
     if (!drawing) return;
-
-    const ctx = canvasRef.current.getContext("2d");
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = e.nativeEvent.clientX - rect.left;
+    const y = e.nativeEvent.clientY - rect.top;
 
-    ctx.lineTo(x, y);
-    ctx.stroke();
-
-    const newPath = [...currentPath, { x, y }];
-    setCurrentPath(newPath);
-
+    setCurrentPath((prev) => [...prev, { x, y }]);
     if (socket) {
       socket.emit("draw-move", {
-        roomId: roomId,
-        x: x,
-        y: y,
+        roomId,
+        x,
+        y,
       });
+    }
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  // Handle drawing end and store in DB using Axios
+  const handleStopDrawing = async () => {
+    setDrawing(false);
+
+    if (currentPath.length > 1) {
+      try {
+        await axios.post(`${BASE_URL}/api/rooms/${roomId}/draw`, {
+          type: "stroke",
+          data: {
+            path: currentPath,
+            color,
+            width: thickness,
+          },
+          timestamp: new Date(),
+        });
+
+        // Notify peers for instant drawing (no storage)
+        if (socket) {
+          socket.emit("draw-end", {
+            roomId,
+            path: currentPath,
+            color,
+            width: thickness,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to save drawing:", error);
+      }
+    }
+
+    setCurrentPath([]);
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.closePath();
+  };
+
+  // Handle clear event and persist using Axios
+  const handleClearCanvas = async () => {
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+
+    try {
+      await axios.post(`${BASE_URL}/api/rooms/${roomId}/clear`, {
+        type: "clear",
+        data: {},
+        timestamp: new Date(),
+      });
+      if (socket) socket.emit("clear-canvas", { roomId });
+    } catch (error) {
+      console.error("Failed to clear canvas:", error);
     }
   };
 
-  // Handle cursor movement for real-time tracking
+  const handleColorChange = (colorObj) => {
+    setColor(colorObj.hex || colorObj);
+  };
+
+  const handleThicknessChange = (e) => {
+    setThickness(Number(e.target.value));
+  };
+
+  // Cursor tracking
   const handleMouseMove = useCallback(
     (e) => {
-      // Handle drawing if currently drawing
-      if (drawing) {
-        handleDraw(e);
-      }
+      if (drawing) handleDraw(e);
 
-      // Handle cursor tracking
       if (socket && canvasRef.current) {
         const rect = canvasRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        // Throttle cursor updates to ~60fps
-        if (cursorThrottleRef.current) {
-          clearTimeout(cursorThrottleRef.current);
-        }
-
-        cursorThrottleRef.current = setTimeout(() => {
-          socket.emit("cursor-move", {
-            roomId: roomId,
-            x: x,
-            y: y,
-            userId: socket.id,
-            color: getCursorColor(socket.id),
-          });
-        }, 16); // ~60fps
+        const x = e.nativeEvent.clientX - rect.left;
+        const y = e.nativeEvent.clientY - rect.top;
+        socket.emit("cursor-move", {
+          roomId,
+          x,
+          y,
+          color: getCursorColor(socket.id),
+          userId: socket.id,
+        });
       }
     },
-    [drawing, socket, roomId, color, thickness]
+    [drawing, socket, roomId, thickness, color]
   );
 
   const handleMouseLeave = () => {
     if (socket) {
-      socket.emit("cursor-leave", {
-        roomId: roomId,
-        userId: socket.id,
-      });
+      socket.emit("cursor-leave", { roomId, userId: socket.id });
     }
   };
 
-  const handleThicknessChange = (e) => {
-    setThickness(e.target.value);
-  };
-
-  const handleClearCanvas = () => {
-    const ctx = canvasRef.current.getContext("2d");
-    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    if (socket) {
-      socket.emit("clear-canvas", { roomId });
-    }
-  };
-
-  const handleColorChange = (selectedColor) => {
-    setColor(selectedColor.hex);
-  };
-
-  // Generate cursor color based on user ID
+  // Assign deterministic color to user
   const getCursorColor = (userId) => {
     const colors = [
       "#FF6B6B",
@@ -155,67 +163,63 @@ const DrawingCanvas = ({ roomId }) => {
       "#DDA0DD",
       "#98D8C8",
     ];
+    if (!userId) return "#000";
     const index =
-      userId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) %
+      userId.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0) %
       colors.length;
     return colors[index];
   };
 
-  // Draw path helper function
-  const drawPath = (path, strokeColor, lineWidth) => {
+  // Draw path given array of points
+  const drawPath = (path, c, w) => {
     if (!path || path.length < 2) return;
-
     const ctx = canvasRef.current.getContext("2d");
     ctx.beginPath();
     ctx.moveTo(path[0].x, path[0].y);
-
-    for (let i = 1; i < path.length; i++) {
-      ctx.lineTo(path[i].x, path[i].y);
-    }
-
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = lineWidth;
+    for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+    ctx.strokeStyle = c;
+    ctx.lineWidth = w;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.stroke();
     ctx.closePath();
   };
 
+  // Load full drawing history from backend via Axios
   useEffect(() => {
-    // Initialize socket connection
-    const newSocket = io(`http://localhost:5000`); // Changed port to match project overview
-
-    newSocket.on("connect", () => {
-      console.log(`Connected with ID: ${newSocket.id}`);
-    });
-
-    setSocket(newSocket);
-
-    // Join room using the specified event name
-    newSocket.emit("join-room", roomId);
-
-    // Initialize canvas
-    const canvas = canvasRef.current;
-    const context = canvas.getContext("2d");
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-
-    // Socket event listeners as per project overview
-
-    // Load initial drawing data
-    newSocket.on("init-drawing", (drawingData) => {
-      if (drawingData && drawingData.length > 0) {
-        drawingData.forEach((command) => {
-          if (command.type === "stroke") {
-            drawPath(command.data.path, command.data.color, command.data.width);
-          } else if (command.type === "clear") {
-            context.clearRect(0, 0, canvas.width, canvas.height);
+    const fetchDrawingData = async () => {
+      try {
+        const res = await axios.get(`${BASE_URL}/api/rooms/${roomId}`);
+        const drawingData = res.data?.drawingData || [];
+        const ctx = canvasRef.current.getContext("2d");
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        drawingData.forEach((cmd) => {
+          if (cmd.type === "stroke") {
+            drawPath(cmd.data.path, cmd.data.color, cmd.data.width);
+          } else if (cmd.type === "clear") {
+            ctx.clearRect(
+              0,
+              0,
+              canvasRef.current.width,
+              canvasRef.current.height
+            );
           }
         });
+      } catch (err) {
+        console.error("Failed to fetch initial drawing data:", err);
       }
-    });
+    };
 
-    // Handle drawing events from other users
+    fetchDrawingData();
+  }, [roomId]);
+
+  // Socket setup: for real-time sync, not for fetch/store
+  useEffect(() => {
+    const newSocket = io("http://localhost:5000");
+    setSocket(newSocket);
+
+    newSocket.emit("join-room", roomId);
+
     newSocket.on("draw-start", (data) => {
       const ctx = canvasRef.current.getContext("2d");
       ctx.beginPath();
@@ -233,15 +237,17 @@ const DrawingCanvas = ({ roomId }) => {
     });
 
     newSocket.on("draw-end", (data) => {
+      if (data.path) drawPath(data.path, data.color, data.width);
       const ctx = canvasRef.current.getContext("2d");
       ctx.closePath();
-      // Optionally redraw the entire path for consistency
-      // if (data.path) {
-      //   drawPath(data.path, data.color, data.width);
-      // }
     });
 
-    // Handle cursor tracking
+    newSocket.on("clear-canvas", () => {
+      const ctx = canvasRef.current.getContext("2d");
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    });
+
+    // Cursor tracking & presence
     newSocket.on("cursor-move", (data) => {
       if (data.userId !== newSocket.id) {
         setOtherCursors((prev) => ({
@@ -264,18 +270,8 @@ const DrawingCanvas = ({ roomId }) => {
       });
     });
 
-    // Handle canvas clearing
-    newSocket.on("clear-canvas", () => {
-      const ctx = canvasRef.current.getContext("2d");
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    });
+    newSocket.on("user-count", (count) => setActiveUsers(count));
 
-    // Handle user count updates
-    newSocket.on("user-count", (count) => {
-      setActiveUsers(count);
-    });
-
-    // Handle user disconnection
     newSocket.on("user-disconnected", (userId) => {
       setOtherCursors((prev) => {
         const updated = { ...prev };
@@ -284,51 +280,28 @@ const DrawingCanvas = ({ roomId }) => {
       });
     });
 
-    // Cleanup old cursors periodically
-    const cleanupInterval = setInterval(() => {
+    const cleanup = setInterval(() => {
       const now = Date.now();
       setOtherCursors((prev) => {
         const updated = {};
-        Object.entries(prev).forEach(([userId, cursor]) => {
-          if (now - cursor.lastSeen < 3000) {
-            updated[userId] = cursor;
-          }
+        Object.entries(prev).forEach(([uid, cur]) => {
+          if (now - cur.lastSeen < 3000) updated[uid] = cur;
         });
         return updated;
       });
     }, 1000);
 
-    // Cleanup on unmount
     return () => {
-      if (cursorThrottleRef.current) {
-        clearTimeout(cursorThrottleRef.current);
-      }
       newSocket.emit("leave-room", roomId);
       newSocket.disconnect();
-      clearInterval(cleanupInterval);
+      clearInterval(cleanup);
     };
   }, [roomId]);
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
-      {/* User Presence Indicator */}
-      <div
-        style={{
-          position: "absolute",
-          top: "20px",
-          right: "20px",
-          zIndex: 1000,
-          backgroundColor: "rgba(0, 0, 0, 0.8)",
-          color: "white",
-          padding: "10px 15px",
-          borderRadius: "25px",
-          fontSize: "14px",
-          fontFamily: "Arial, sans-serif",
-          fontWeight: "bold",
-          boxShadow: "0 2px 10px rgba(0,0,0,0.3)",
-        }}
-      >
-        👥 {activeUsers} user{activeUsers !== 1 ? "s" : ""} online
+      <div className="absolute flex justify-items-center gap-2 top-[20px] right-[20px] z-10 border font-semibold border-gray-200 font-xl px-4 py-2 rounded-full">
+        <Users /> {activeUsers} User{activeUsers !== 1 ? "s" : ""} online
       </div>
 
       <canvas
@@ -348,7 +321,6 @@ const DrawingCanvas = ({ roomId }) => {
         }}
       />
 
-      {/* Render other users' cursors */}
       <UserCursors cursors={otherCursors} />
 
       <Toolbar

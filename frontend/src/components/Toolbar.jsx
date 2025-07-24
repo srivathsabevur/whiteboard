@@ -1,5 +1,6 @@
 import { CirclePicker } from "react-color";
 import Slider from "@mui/material/Slider";
+import { PencilLine, BrushCleaning, Brush } from "lucide-react";
 
 const Toolbar = ({
   showSlider,
@@ -60,21 +61,24 @@ const Toolbar = ({
       <div className="flex p-3 gap-3 border border-gray-300 hover:shadow-2xl rounded-full z-10 transition-all ease-in duration-150">
         <button
           onClick={() => setShowSlider(!showSlider)}
-          className="bg-fuchsia-500 px-3 py-2 text-white rounded-full hover:scale-110 transition-all ease-in duration-150 cursor-pointer"
+          className="flex justify-center items-center gap-2 text-lg font-semibold bg-black px-3 py-2 text-white rounded-full hover:scale-110 transition-all ease-in duration-150 cursor-pointer"
         >
+          <PencilLine />
           Change Thickenss
         </button>
 
         <button
           onClick={handleClearCanvas}
-          className="bg-red-500 px-3 py-2 text-white rounded-full hover:scale-110 transition-all ease-in duration-150 cursor-pointer"
+          className="flex justify-center items-center gap-2 text-lg font-semibold bg-red-500 px-3 py-2 text-white rounded-full hover:scale-110 transition-all ease-in duration-150 cursor-pointer"
         >
+          <BrushCleaning />
           Reset
         </button>
         <button
           onClick={() => setShowColors(!showColors)}
-          className="bg-fuchsia-500 px-3 py-2 text-white rounded-full hover:scale-110 transition-all ease-in duration-150 cursor-pointer"
+          className="flex justify-center items-center gap-2 text-lg font-semibold bg-black px-3 py-2 text-white rounded-full hover:scale-110 transition-all ease-in duration-150 cursor-pointer"
         >
+          <Brush />
           Change Color
         </button>
       </div>

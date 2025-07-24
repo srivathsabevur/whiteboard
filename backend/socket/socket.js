@@ -50,7 +50,7 @@ module.exports.socketIo = (server) => {
 
       // Save to database
       if (currentRoom) {
-        await Room.updateOne(
+        await roomModel.updateOne(
           { roomId: currentRoom },
           {
             $push: {

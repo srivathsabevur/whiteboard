@@ -24,7 +24,7 @@ const RoomJoin = () => {
     <div className="flex justify-center items-center h-[70vh]">
       <form
         onSubmit={handleSubmit}
-        className="flex flex-col p-6 text-white bg-fuchsia-500 rounded-lg shadow-2xl md:w-1/6 w-1/3"
+        className="flex flex-col p-6 text-white bg-gray-500 rounded-lg shadow-2xl md:w-1/6 w-1/3"
       >
         <div className="flex flex-col w-full mb-2">
           <label for="roomId" className="text-2xl font-semibold mb-3">
